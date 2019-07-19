@@ -1,0 +1,215 @@
+---
+title: "Annotation Database Workshop - ESIP Summer 2019"
+author: "Simon Goring"
+date: "July 19, 2019"
+output:
+  html_document:
+    self_contained: false
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+## Workshop Goals
+
+### Preliminary talk
+
+Presentation:
+
+  * Clarify the motivations behind the Throughput project.
+  * Understand the structure of the Throughput Annotation schema and W3C Annotations
+  * Understand how data resources are encoded in Throughput
+  * Understand what is meant by "code resources" and how they can be discovered
+
+### Graph Overview and Relationships
+
+  * Looking at several examples, what kinds of queries would we want?
+  * How do we find appropriate code examples?
+  * What is an example of code, and what is documentation?
+
+### Wishlists
+
+  * Moving beyond Github
+  * Curated resources
+  * Domain views
+
+## Graph Overview
+
+```{r echo=FALSE}
+library(neo4r)
+library(dplyr)
+library(jsonlite)
+library(igraph)
+
+pass <- readr::read_lines('auth.log')
+
+con <- neo4j_api$new(
+  url = "http://localhost:7474",
+  user = pass[1],
+  password = pass[2]
+)
+```
+
+### How many Data Catalogs are in the Database
+
+```coffeescript
+MATCH (:TYPE {type:"schema:DataCatalog"})-[:isType]-(odc:OBJECT)
+RETURN COUNT(DISTINCT odc)
+```
+
+```{r dc_count, echo=FALSE}
+counts <- 'MATCH (:TYPE {type:"schema:DataCatalog"})-[:isType]-(odc:OBJECT)
+RETURN COUNT(DISTINCT odc)
+' %>%
+  call_neo4j(con)
+```
+
+Currently there are `r counts[[1]]$value` distinct data catalogues linked through DOIs to annotation databases.
+
+### How many Code Repositories are in the Database
+
+```coffeescript
+OPTIONAL MATCH (:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)-[:Target]-()
+RETURN COUNT(DISTINCT ocr)
+```
+
+```{r repo_count, echo=FALSE}
+counts <- 'OPTIONAL MATCH (:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)-[:Target]-()
+RETURN COUNT(DISTINCT ocr)' %>%
+  call_neo4j(con)
+```
+
+Currently there are `r counts[[1]]$value` distinct GitHub code repositories linked to data catalogues by the annotation database.
+
+### What Distinct Keywords have been Linked
+
+```coffeescript
+MATCH (:TYPE {type: "schema:DataCatalog"})-[:isType]-(ob:OBJECT)
+UNWIND SPLIT(ob.keywords, ",") AS uwky
+WITH toLower(TRIM(uwky)) AS keywords
+RETURN keywords, n
+ORDER BY n
+```
+
+```{r kword_tab, echo=FALSE}
+keywords <- 'MATCH (:TYPE {type: "schema:DataCatalog"})-[:isType]-(ob:OBJECT)
+UNWIND SPLIT(ob.keywords, ",") AS uwky
+WITH toLower(TRIM(uwky)) AS keywords
+RETURN DISTINCT keywords, COUNT(keywords) AS n
+ORDER BY n'  %>%
+  call_neo4j(con) %>%
+  as.data.frame() %>%
+  rename(keyword = "value", count = "value.1")
+
+DT::datatable(keywords %>% filter(count > 10))
+```
+
+### Find Linked Code and Data Repositories
+
+This query returns all data repositories linked to multiple research databases.
+
+```coffeescript
+MATCH (:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)
+WITH ocr
+MATCH p=(:TYPE {type:"schema:DataCatalog"})-[:isType]-(odc_a:OBJECT)-[:Target]-(:ANNOTATION)-[:Target]-(ocr)-[:Target]-(:ANNOTATION)-[:Target]-(odc_b:OBJECT)-[:isType]-(:TYPE {type:"schema:DataCatalog"})
+WHERE odc_a <> odc_b
+WITH DISTINCT ocr.name AS repo, ocr.description AS desc, COLLECT([odc_a.name, odc_b.name]) AS dbs
+UNWIND dbs AS x
+UNWIND x AS y
+RETURN repo, desc, COLLECT(DISTINCT y) AS dbs, COUNT(DISTINCT y) AS n
+ORDER BY n DESC
+```
+
+```{r dbl_link, echo=FALSE}
+linked_repos <- 'MATCH (:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)
+  WITH ocr
+  MATCH p=(:TYPE {type:"schema:DataCatalog"})-[:isType]-(odc_a:OBJECT)-[:Target]-(:ANNOTATION)-[:Target]-(ocr)-[:Target]-(:ANNOTATION)-[:Target]-(odc_b:OBJECT)-[:isType]-(:TYPE {type:"schema:DataCatalog"})
+  WHERE odc_a <> odc_b
+  WITH DISTINCT ocr.name AS repo, ocr.description AS desc, COLLECT([odc_a.name, odc_b.name]) AS dbs
+  UNWIND dbs AS x
+  UNWIND x AS y
+  RETURN repo, desc, COLLECT(DISTINCT y) AS dbs, COUNT(DISTINCT y) AS n
+  ORDER BY n DESC'  %>%
+  call_neo4j(con, output="json") %>%
+  fromJSON(flatten = TRUE)
+
+linked_df <- linked_repos[[1]][[1]] %>%
+  purrr::map(function(x) data.frame(repo = x[[1]],
+                                    description = x[[2]],
+                                    dbs = paste(x[[3]], collapse = ", "),
+                                    n = x[[4]])) %>%
+                                    bind_rows() %>% filter(n > 30)
+
+DT::datatable(linked_df)
+
+```
+
+### Match a specific Database:
+
+```coffeescript
+MATCH p=(:TYPE {type:"schema:DataCatalog"})-[:isType]-(odc:OBJECT)-[]-(:ANNOTATION)-[]-()-[:isType]-(d:TYPE)
+WHERE odc.name STARTS WITH "National River"
+RETURN p
+```
+### Return GitHub Users. Sort by number of linked repositories
+
+```coffeescript
+MATCH p=(:TYPE {type:"schema:CodeRepository"})-[:isType]-(odc:OBJECT)
+WITH SPLIT(odc.name, "/")[0] AS users
+RETURN DISTINCT users, COUNT(users) AS n
+ORDER BY n DESC
+```
+
+```{r githubusers, echo=FALSE}
+gh_user <- 'MATCH p=(:TYPE {type:"schema:CodeRepository"})-[:isType]-(odc:OBJECT)
+    WITH SPLIT(odc.name, "/")[0] AS users
+    RETURN DISTINCT users, COUNT(users) AS n
+    ORDER BY n DESC'  %>%
+  call_neo4j(con) %>%
+  as.data.frame() %>%
+  rename(github_user = "value", repos = "value.1") %>%
+  arrange(desc(repos)) %>%
+  filter(repos > 5)
+
+DT::datatable(gh_user)
+
+```
+
+### How many different resources is a GithHub user associated with?
+
+```coffeescript
+MATCH p=(:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)-[]-(:ANNOTATION)-[]-(obc:OBJECT)-[:isType]-(:TYPE {type:"schema:DataCatalog"})
+WITH SPLIT(ocr.name, "/")[0] AS owner, COUNT(DISTINCT obc.name) AS n, COLLECT(DISTINCT obc.name) AS resources
+WHERE n > 3
+RETURN owner, n, resources
+ORDER BY n DESC, resources[0]
+```
+
+```{r users_repos, echo=FALSE}
+repo_list <- 'MATCH p=(:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)-[]-(:ANNOTATION)-[]-(obc:OBJECT)-[:isType]-(:TYPE {type:"schema:DataCatalog"})
+  WITH SPLIT(ocr.name, "/")[0] AS owner, COLLECT(DISTINCT SPLIT(ocr.name, "/")[1]) AS repos,  COUNT(DISTINCT obc.name) AS n, COLLECT(DISTINCT obc.name) AS resources
+  WHERE n > 3
+  RETURN owner, repos, n, resources
+  ORDER BY n DESC, resources[0]' %>%
+  call_neo4j(con, output = "json") %>%
+  fromJSON(flatten=TRUE)
+
+repo_df <- repo_list[[1]][[1]] %>%
+  purrr::map(function(x) data.frame(owner = x[[1]],
+                                    repos = paste(x[[2]], collapse = ", "),
+                                    n = x[[3]],
+                                    dbs = paste(x[[4]], collapse = ", "))) %>%
+                                    bind_rows() %>% filter(n > 6)
+
+DT::datatable(repo_df)
+
+```
+
+
+### Match a specific repository:
+
+```coffeescript
+MATCH p=(:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)-[]-(:ANNOTATION)-[]-()-[:isType]-(d:TYPE)
+WHERE ocr.name = "jansergithub/awesome-public-datasets"
+RETURN p
+```
