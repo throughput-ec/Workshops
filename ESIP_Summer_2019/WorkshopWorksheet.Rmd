@@ -35,7 +35,7 @@ Presentation:
 
 ## Graph Overview
 
-```{r echo=FALSE}
+```{r load_pkgs, echo=FALSE, warnings = FALSE, messages=FALSE}
 library(neo4r)
 library(dplyr)
 library(jsonlite)
@@ -57,7 +57,7 @@ MATCH (:TYPE {type:"schema:DataCatalog"})-[:isType]-(odc:OBJECT)
 RETURN COUNT(DISTINCT odc)
 ```
 
-```{r dc_count, echo=FALSE}
+```{r dc_count, echo=FALSE, warnings = FALSE, messages=FALSE}
 counts <- 'MATCH (:TYPE {type:"schema:DataCatalog"})-[:isType]-(odc:OBJECT)
 RETURN COUNT(DISTINCT odc)
 ' %>%
@@ -73,7 +73,7 @@ OPTIONAL MATCH (:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)-[:T
 RETURN COUNT(DISTINCT ocr)
 ```
 
-```{r repo_count, echo=FALSE}
+```{r repo_count, echo=FALSE, warnings = FALSE, messages=FALSE}
 counts <- 'OPTIONAL MATCH (:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)-[:Target]-()
 RETURN COUNT(DISTINCT ocr)' %>%
   call_neo4j(con)
@@ -91,7 +91,7 @@ RETURN keywords, n
 ORDER BY n
 ```
 
-```{r kword_tab, echo=FALSE}
+```{r kword_tab, echo=FALSE, warnings = FALSE, messages=FALSE}
 keywords <- 'MATCH (:TYPE {type: "schema:DataCatalog"})-[:isType]-(ob:OBJECT)
 UNWIND SPLIT(ob.keywords, ",") AS uwky
 WITH toLower(TRIM(uwky)) AS keywords
@@ -120,7 +120,7 @@ RETURN repo, desc, COLLECT(DISTINCT y) AS dbs, COUNT(DISTINCT y) AS n
 ORDER BY n DESC
 ```
 
-```{r dbl_link, echo=FALSE}
+```{r dbl_link, echo=FALSE, warning=FALSE, message=FALSE}
 linked_repos <- 'MATCH (:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)
   WITH ocr
   MATCH p=(:TYPE {type:"schema:DataCatalog"})-[:isType]-(odc_a:OBJECT)-[:Target]-(:ANNOTATION)-[:Target]-(ocr)-[:Target]-(:ANNOTATION)-[:Target]-(odc_b:OBJECT)-[:isType]-(:TYPE {type:"schema:DataCatalog"})
@@ -160,7 +160,7 @@ RETURN DISTINCT users, COUNT(users) AS n
 ORDER BY n DESC
 ```
 
-```{r githubusers, echo=FALSE}
+```{r githubusers, , echo=FALSE, warning=FALSE, message=FALSE}
 gh_user <- 'MATCH p=(:TYPE {type:"schema:CodeRepository"})-[:isType]-(odc:OBJECT)
     WITH SPLIT(odc.name, "/")[0] AS users
     RETURN DISTINCT users, COUNT(users) AS n
@@ -185,7 +185,7 @@ RETURN owner, n, resources
 ORDER BY n DESC, resources[0]
 ```
 
-```{r users_repos, echo=FALSE}
+```{r users_repos, echo=FALSE, warning=FALSE, message=FALSE}
 repo_list <- 'MATCH p=(:TYPE {type:"schema:CodeRepository"})-[:isType]-(ocr:OBJECT)-[]-(:ANNOTATION)-[]-(obc:OBJECT)-[:isType]-(:TYPE {type:"schema:DataCatalog"})
   WITH SPLIT(ocr.name, "/")[0] AS owner, COLLECT(DISTINCT SPLIT(ocr.name, "/")[1]) AS repos,  COUNT(DISTINCT obc.name) AS n, COLLECT(DISTINCT obc.name) AS resources
   WHERE n > 3
